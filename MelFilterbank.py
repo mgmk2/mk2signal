@@ -1,6 +1,6 @@
 import numpy as np
 
-class Mel(object):
+class MelFilterbank(object):
     def __init__(self, window, fs):
         self.window = window
         self.fs = fs
