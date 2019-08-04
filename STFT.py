@@ -7,13 +7,18 @@ class STFT(object):
         self.strides = 0.5
         self.noverlap = int(self.wlen * self.strides)
         self.window = window
+        self.wf = self.get_window(window)
 
-    def get_window(self, dtype=None):
-        self.window == 'hann':
+    def get_window(self, window, dtype=None):
+        if dtype is None:
+            dtype = np.float64
+
+        if window == 'hann':
             wf = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(self.wlen) / self.wlen)
         else:
+            print('Unknown window name: ' + window)
             wf = self.ones([self.wlen])
-        return wf
+        return wf.astype(dtype)
 
     def transform(self, x, dtype=None):
         # set dtype
