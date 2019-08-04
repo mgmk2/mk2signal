@@ -42,6 +42,7 @@ class STFT(object):
 
         frame = y.shape[-2]
         x = np.zeros([*y.shape[:-2], (frame + 1) * self.noverlap], dtype=dtype)
+        xx = np.fft.irfft(y)
         for tt in range(frame):
-            x[..., tt * self.noverlap:tt * self.noverlap + self.wlen] += np.fft.irfft(y[..., tt, :])
+            x[..., tt * self.noverlap:tt * self.noverlap + self.wlen] += xx[..., tt, :]
         return x
