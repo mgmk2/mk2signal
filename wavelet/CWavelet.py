@@ -58,12 +58,15 @@ class CWavelet(object):
             freq_period = self._get_freq_linear(freq, n_freq=n_freq, interval=interval)
         return freq_period
 
-    def _get_time(self, n):
+    def _get_window(self, n):
+        return np.arange(-n // 2, (n - 1) // 2)
+
+    def _get_range(self, n):
         if self.wavelet_window is None:
-            wavelet_window = (-n + 1, n - 1)
+            m = 2 * n - 1
         else:
-            wavelet_window = self.wavelet_window
-        return np.arange(wavelet_window[0], wavelet_window[1] + 1)
+            m = self.wavelet_window
+        return self._get_window(m)
 
     def _fft_convolve(self, x1, x2):
         if x1.shape[-1] < x2.shape[-1]:
@@ -75,29 +78,54 @@ class CWavelet(object):
         y = np.fft.ifft(s1 * s2, x1_len)
         return y[..., -x2_len:]
 
-    def _transform_via_fft(self, x, stride):
-        y = self._fft_convolve(x, self.W[..., ::-1].conj())
-        return y[..., ::stride]
+    def _transform_via_fft(self, x, strides):
+        y = self._fft_convolve(x[..., np.newaxis, :], self.W[..., ::-1].conj())
+        return y[..., ::strides]
 
-    def transform(self, x, stride=1):
+    def _transform_direct(self, x, strides):
+        nw = self.W.shape[-1]
+        p = (x.ndim - 1) * [(0, 0)] + [(nw // 2, nw // 2)]
+        x2 = np.pad(x, p, mode='constant')
+        n2 = x2.shape[-1]
+        num_strides = (n2 - nw) // strides + 1
+        y = np.zeros([*list(x.shape[:-1]), self.W.shape[0], num_strides], np.complex128)
+        for i in range(num_strides):
+            xi = x2[..., np.newaxis, i * strides:i * strides + nw]
+            y[..., :, i] = np.sum(xi.astype(np.complex128) * self.W, axis=-1)
+        return y
 
-        if self.wavelet_window is None:
-            n = self._get_time(x.shape[-1])
-            if self.W is None or self.W.shape[-1] != 2 * n - 1:
-                self.W = self.wavelet.get_W(n, self.scale, self.dt)
+    def _transform(self, x, strides):
+        Nmax = max(x.shape[-1], self.W.shape[-1])
+        Nmin = min(x.shape[-1], self.W.shape[-1])
+        cost_fft = Nmax * np.log(Nmax)
+        cost_direct = Nmin * max(1, x.shape[-1] // strides)
+        if cost_fft < cost_direct:
+            print('use fft convolution')
+            y = self._transform_via_fft(x, strides)
+        else:
+            print('use direct convolution')
+            y = self._transform_direct(x, strides)
+        return y
 
+    def transform(self, x, strides=1):
+        self.n = self._get_range(x.shape[-1])
+        if self.W is None or self.W.shape[-1] != self.n.shape[-1]:
+            self.W = self.wavelet.get_W(self.n, self.scale, self.dt)
         # wavelet transform
-        y = self._transform_via_fft(x, stride)
+        y = self._transform(x, strides)
         return y
 
     def transform_inverse(self, y):
         # y: [s, n]
         # W: [s, n]
 
-        if self.wavelet_window is None:
-            n = self._get_time(y.shape[-1])
-            if self.W_inverse is None or self.W_inverse.shape[-1] != 2 * n - 1:
-                self.W_inverse = self.wavelet.get_W_inverse(n, self.scale, self.dt)
+        self.n = self._get_range(y.shape[-1])
+        if self.W_inverse is None or self.W_inverse.shape[-1] != self.n[-1]:
+            self.W_inverse = self.wavelet.get_W_inverse(self.n, self.scale, self.dt)
         xs = self._fft_convolve(y, self.W_inverse)
         x = self.df * np.sum(xs.real, axis=-2)
         return x
+
+    def relative_power(self, N):
+        n = self._get_window(N)
+        return self.wavelet.relative_power(n, self.scale, self.dt)
