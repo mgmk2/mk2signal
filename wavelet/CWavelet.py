@@ -1,21 +1,30 @@
 import numpy as np
 from .Morlet import Morlet
 
+def fft_convolve(x1, x2):
+    if x1.shape[-1] < x2.shape[-1]:
+        x1, x2 = x2, x1
+    x1_len = x1.shape[-1]
+    x2_len = x2.shape[-1]
+    s1 = np.fft.fft(x1, x1_len)
+    s2 = np.fft.fft(x2, x1_len)
+    y = np.fft.ifft(s1 * s2, x1_len)
+    return y[..., -x2_len:]
+
 class CWavelet(object):
-    def __init__(self, fs, wavelet='morlet', w0=6.0, wavelet_window=None,
+    def __init__(self, fs, wavelet='morlet', w0=6.0, window_len=None,
         freq=None, freq_scale='log', n_freq=None, interval_freq=None):
 
         self.fs = fs # sampling frequency
         self.dt = 1 / self.fs # sampling interval
         self.df = 1 / 12
-        self.wavelet_window = wavelet_window
+        self.window_len_init = window_len
+        self.window_len = window_len
+        self.W = None
         if wavelet == 'morlet':
             self.wavelet = Morlet(w0=w0) # Wavelet class
         else:
             raise ValueError('Unexpected wavelet: ' + str(wavelet))
-
-        self.W = None
-        self.W_inverse = None
 
         if freq is None:
             freq = (13.75, self.fs // 2)
@@ -51,38 +60,25 @@ class CWavelet(object):
         freq_period = np.linspace(freq[0], freq[1], 2 * n_freq + 1, dtype=np.float64)[1::2]
         return freq_period
 
-    def get_freq_period(self, freq, freq_scale='log', n_freq=None, interval=None):
+    def get_freq_period(self, freq, n_freq=None, interval=None):
         if freq_scale == 'log':
             freq_period = self._get_freq_log(freq)
         elif freq_scale == 'linear':
             freq_period = self._get_freq_linear(freq, n_freq=n_freq, interval=interval)
         return freq_period
 
-    def _get_window(self, n):
-        return np.arange(-n // 2, (n - 1) // 2)
-
-    def _get_range(self, n):
-        if self.wavelet_window is None:
-            m = 2 * n - 1
+    def _get_window_len(self, n):
+        if self.window_len_init is None:
+            window_len = 2 * n - 1
         else:
-            m = self.wavelet_window
-        return self._get_window(m)
-
-    def _fft_convolve(self, x1, x2):
-        if x1.shape[-1] < x2.shape[-1]:
-            x1, x2 = x2, x1
-        x1_len = x1.shape[-1]
-        x2_len = x2.shape[-1]
-        s1 = np.fft.fft(x1, x1_len)
-        s2 = np.fft.fft(x2, x1_len)
-        y = np.fft.ifft(s1 * s2, x1_len)
-        return y[..., -x2_len:]
+            window_len = self.window_len_init
+        return window_len
 
     def _transform_via_fft(self, x, strides):
-        y = self._fft_convolve(x[..., np.newaxis, :], self.W[..., ::-1].conj())
+        y = fft_convolve(x[..., np.newaxis, :], self.W[..., ::-1].conj())
         return y[..., ::strides]
 
-    def _transform_direct(self, x, strides):
+    def _transform_directly(self, x, strides):
         nw = self.W.shape[-1]
         p = (x.ndim - 1) * [(0, 0)] + [(nw // 2, nw // 2)]
         x2 = np.pad(x, p, mode='constant')
@@ -100,32 +96,28 @@ class CWavelet(object):
         cost_fft = Nmax * np.log(Nmax)
         cost_direct = Nmin * max(1, x.shape[-1] // strides)
         if cost_fft < cost_direct:
-            print('use fft convolution')
             y = self._transform_via_fft(x, strides)
         else:
-            print('use direct convolution')
-            y = self._transform_direct(x, strides)
+            y = self._transform_directly(x, strides)
         return y
 
+    def _update_W(self, N):
+        window_len = self._get_window(N)
+        if self.W is None or self.window_len != window_len:
+            self.window_len = window_len
+            self.n = np.arange(-window_len // 2, (window_len - 1) // 2)
+            t = self.n * self.dt
+            self.W = self.wavelet.get_W(t, self.scale)
+
     def transform(self, x, strides=1):
-        self.n = self._get_range(x.shape[-1])
-        if self.W is None or self.W.shape[-1] != self.n.shape[-1]:
-            self.W = self.wavelet.get_W(self.n, self.scale, self.dt)
+        self._update_W(x.shape[-1])
         # wavelet transform
         y = self._transform(x, strides)
         return y
 
     def transform_inverse(self, y):
-        # y: [s, n]
-        # W: [s, n]
-
-        self.n = self._get_range(y.shape[-1])
-        if self.W_inverse is None or self.W_inverse.shape[-1] != self.n[-1]:
-            self.W_inverse = self.wavelet.get_W_inverse(self.n, self.scale, self.dt)
-        xs = self._fft_convolve(y, self.W_inverse)
-        x = self.df * np.sum(xs.real, axis=-2)
+        self._update_W(y.shape[-1])
+        C = self.wavelet.C
+        xs = fft_convolve(y, self.W)
+        x = 2 * np.log(2) * self.df / C * np.sum(xs.real, axis=-2)
         return x
-
-    def relative_power(self, N):
-        n = self._get_window(N)
-        return self.wavelet.relative_power(n, self.scale, self.dt)
