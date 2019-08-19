@@ -29,10 +29,10 @@ class Morlet(object):
             np.exp(-0.5 * t ** 2) * (np.exp(1j * self.w0 * t) - k) # [n, s]
         return W
 
-    def get_W(self, n, s):
+    def get_W(self, t, scale):
         # calc wavelet at scale s
-        t = n.reshape([1, -1]) / s.reshape([-1, 1])
-        W = self._get_W(t) / s.reshape([-1, 1]) ** 0.5
+        tt = t.reshape([1, -1]) / scale.reshape([-1, 1])
+        W = self._get_W(tt) / scale.reshape([-1, 1]) ** 0.5
         return W
 
     def freq2scale(self, freq):
@@ -41,10 +41,10 @@ class Morlet(object):
         #   wf = w0 / (1 - exp(-wf * w0))
         # if w0 > 5, wf is nearly equal to w0.
 
-        wf = self.w0
+        w_center = self.w0
         for i in range(100):
-            w = wf
-            wf = self.w0 / (1 - np.exp(-w * self.w0))
-            if np.abs(wf - w) < 1.0e-8:
+            w = w_center
+            w_center = self.w0 / (1 - np.exp(-w * self.w0))
+            if np.abs(w_center - w) < 1.0e-8:
                 break
-        return w / (2 * np.pi * freq)
+        return w_center / (2 * np.pi * freq)
