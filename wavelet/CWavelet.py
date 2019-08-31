@@ -64,14 +64,18 @@ class CWavelet(object):
             self.n = np.arange(-(window_len // 2), (window_len + 1) // 2)
             self.W = self.wavelet.get_W(self.n * self.dt, self.scale)
 
-    def transform(self, x, strides=1):
+    def transform(self, x, strides=1, normalize=True):
         self._update_W(x.shape[-1])
         y = self.dt * self._transform(x, strides)
+        if normalize:
+            y *= 1 / self.scale.reshape([-1, 1]) ** 0.5
         return y
 
-    def transform_inverse(self, y):
+    def transform_inverse(self, y, normalize=True):
         self._update_W(y.shape[-1])
-        xs = fft_convolve(y, self.W) / self.scale.reshape([-1, 1])
+        xs = fft_convolve(y, self.W)
+        if normalize:
+            xs *= 1 / self.scale.reshape([-1, 1]) ** 0.5
         coefficient = 2 * np.log(2) * self.dt / self.n_per_octave / self.wavelet.C
         x = coefficient * np.sum(xs.real, axis=-2)
         return x
