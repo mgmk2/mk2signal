@@ -12,10 +12,9 @@ class MultiTaper(object):
         r = 2 * self.resolution * self.fs / N
         k = np.arange(N, dtype=np.float64)
         kl = k[:, np.newaxis] - k[np.newaxis, :]
-        kl *= np.pi
         kl[np.eye(N, dtype=bool)] = 1
-        Phi = np.sin(r / self.fs * kl) / kl
-        Phi[np.eye(N, dtype=bool)] = r / self.fs
+        Phi = np.sin(np.pi * r / self.fs * kl) / kl
+        Phi[np.eye(N, dtype=bool)] = np.pi * r / self.fs
         _, W = LA.eig(Phi)
         L = int(2 * r) - 1
         if L == 1:
